@@ -68,6 +68,35 @@ def command_list():
     return 0
 
 
+def invalid_number(raw_number):
+    print(f"Invalid todo number: {raw_number}", file=sys.stderr)
+    return 1
+
+
+def command_done(raw_number):
+    try:
+        number = int(raw_number)
+    except ValueError:
+        return invalid_number(raw_number)
+
+    if number < 1:
+        return invalid_number(raw_number)
+
+    path = todo_path()
+    lines = read_lines(path)
+    incomplete = incomplete_todos(lines)
+    if number > len(incomplete):
+        return invalid_number(raw_number)
+
+    todo = incomplete[number - 1]
+    original_line = lines[todo.source_index]
+    newline = "\n" if original_line.endswith("\n") else ""
+    lines[todo.source_index] = f"- [x] {todo.text}{newline}"
+    write_lines(path, lines)
+    print(f"Done: {todo.text}")
+    return 0
+
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -76,6 +105,8 @@ def main(argv=None):
         return command_add(" ".join(argv[1:]))
     if len(argv) == 1 and argv[0] == "list":
         return command_list()
+    if len(argv) == 2 and argv[0] == "done":
+        return command_done(argv[1])
 
     print("Usage: mdtodo add TEXT | list | done N", file=sys.stderr)
     return 1

@@ -104,5 +104,94 @@ class AddAndListTests(CliTestCase):
             self.assertFalse(todo_file.exists())
 
 
+class DoneTests(CliTestCase):
+    def test_done_marks_nth_incomplete_item_and_preserves_other_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+            todo_file.write_text(
+                "# Tasks\n"
+                "- [ ] 랩 01 README 읽기\n"
+                "- [x] 이미 완료\n"
+                "plain note\n"
+                "- [ ] Superpowers 설치\n"
+                "- [ ] 랩 02 진행\n",
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.run_cli(["done", "2"], todo_file=todo_file)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "Done: Superpowers 설치\n")
+            self.assertEqual(stderr, "")
+            self.assertEqual(
+                todo_file.read_text(encoding="utf-8"),
+                "# Tasks\n"
+                "- [ ] 랩 01 README 읽기\n"
+                "- [x] 이미 완료\n"
+                "plain note\n"
+                "- [x] Superpowers 설치\n"
+                "- [ ] 랩 02 진행\n",
+            )
+
+    def test_done_then_list_renumbers_remaining_incomplete_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+            todo_file.write_text(
+                "- [ ] 랩 01 README 읽기\n"
+                "- [ ] Superpowers 설치\n"
+                "- [ ] 랩 02 진행\n",
+                encoding="utf-8",
+            )
+
+            done_code, done_stdout, done_stderr = self.run_cli(["done", "2"], todo_file=todo_file)
+            list_code, list_stdout, list_stderr = self.run_cli(["list"], todo_file=todo_file)
+
+            self.assertEqual(done_code, 0)
+            self.assertEqual(done_stdout, "Done: Superpowers 설치\n")
+            self.assertEqual(done_stderr, "")
+            self.assertEqual(list_code, 0)
+            self.assertEqual(
+                list_stdout,
+                "- [ ] 1. 랩 01 README 읽기\n"
+                "- [ ] 2. 랩 02 진행\n",
+            )
+            self.assertEqual(list_stderr, "")
+
+    def test_done_rejects_non_integer_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+            todo_file.write_text("- [ ] one\n", encoding="utf-8")
+
+            code, stdout, stderr = self.run_cli(["done", "abc"], todo_file=todo_file)
+
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "Invalid todo number: abc\n")
+            self.assertEqual(todo_file.read_text(encoding="utf-8"), "- [ ] one\n")
+
+    def test_done_rejects_out_of_range_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+            todo_file.write_text("- [ ] one\n", encoding="utf-8")
+
+            code, stdout, stderr = self.run_cli(["done", "2"], todo_file=todo_file)
+
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "Invalid todo number: 2\n")
+            self.assertEqual(todo_file.read_text(encoding="utf-8"), "- [ ] one\n")
+
+    def test_done_missing_file_is_invalid_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+
+            code, stdout, stderr = self.run_cli(["done", "1"], todo_file=todo_file)
+
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "Invalid todo number: 1\n")
+            self.assertFalse(todo_file.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

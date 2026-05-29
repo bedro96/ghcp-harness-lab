@@ -208,5 +208,43 @@ class DoneTests(CliTestCase):
             self.assertFalse(todo_file.exists())
 
 
+class PathAndCliTests(CliTestCase):
+    def test_default_path_is_tasks_md_in_current_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            code, stdout, stderr = self.run_cli(
+                ["add", "default path task"],
+                cwd=tmp,
+            )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "Added #1: default path task\n")
+            self.assertEqual(stderr, "")
+            self.assertEqual(
+                (Path(tmp) / "tasks.md").read_text(encoding="utf-8"),
+                "- [ ] default path task\n",
+            )
+
+    def test_no_arguments_prints_usage_to_stderr(self):
+        code, stdout, stderr = self.run_cli([])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
+
+    def test_add_without_text_prints_usage_to_stderr(self):
+        code, stdout, stderr = self.run_cli(["add"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
+
+    def test_done_with_extra_argument_prints_usage_to_stderr(self):
+        code, stdout, stderr = self.run_cli(["done", "1", "extra"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
+
+
 if __name__ == "__main__":
     unittest.main()

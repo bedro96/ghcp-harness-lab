@@ -84,7 +84,15 @@ def cmd_add(entries: list[Entry], text: str) -> str:
 
 
 def cmd_done(entries: list[Entry], n: int) -> str:
-    raise NotImplementedError
+    incomplete = [
+        (i, e) for i, e in enumerate(entries)
+        if isinstance(e, TodoItem) and not e.done
+    ]
+    if n < 1 or n > len(incomplete):
+        raise ValueError(n)
+    idx, item = incomplete[n - 1]
+    entries[idx] = TodoItem(text=item.text, done=True)
+    return f'Done #{n}: {item.text}'
 
 
 def main() -> None:

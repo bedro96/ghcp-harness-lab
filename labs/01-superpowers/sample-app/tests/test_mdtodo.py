@@ -2,7 +2,7 @@
 import unittest
 import tempfile
 import os
-from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list, cmd_add
+from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list, cmd_add, cmd_done
 
 
 class TestParse(unittest.TestCase):
@@ -158,6 +158,61 @@ class TestCmdAdd(unittest.TestCase):
         cmd_add(entries, 'last')
         self.assertIsInstance(entries[-1], TodoItem)
         self.assertEqual(entries[-1].text, 'last')
+
+
+class TestCmdDone(unittest.TestCase):
+    def test_marks_first_item_done(self):
+        entries = [TodoItem(text='task one', done=False)]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: task one')
+        self.assertTrue(entries[0].done)
+
+    def test_marks_second_incomplete_done(self):
+        entries = [
+            TodoItem(text='first', done=False),
+            TodoItem(text='second', done=False),
+        ]
+        msg = cmd_done(entries, 2)
+        self.assertEqual(msg, 'Done #2: second')
+        self.assertFalse(entries[0].done)
+        self.assertTrue(entries[1].done)
+
+    def test_skips_already_done_items(self):
+        entries = [
+            TodoItem(text='already done', done=True),
+            TodoItem(text='target', done=False),
+        ]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: target')
+        self.assertTrue(entries[1].done)
+
+    def test_invalid_n_zero_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, 0)
+
+    def test_invalid_n_too_large_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, 2)
+
+    def test_invalid_n_negative_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, -1)
+
+    def test_empty_list_raises(self):
+        with self.assertRaises(ValueError):
+            cmd_done([], 1)
+
+    def test_raw_lines_ignored(self):
+        entries = [
+            RawLine(content='# header'),
+            TodoItem(text='the task', done=False),
+        ]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: the task')
+        self.assertTrue(entries[1].done)
 
 
 if __name__ == '__main__':

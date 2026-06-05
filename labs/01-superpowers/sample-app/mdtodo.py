@@ -73,7 +73,8 @@ def save_file(path: str, entries: list[Entry]) -> None:
 
 
 def cmd_list(entries: list[Entry]) -> list[str]:
-    raise NotImplementedError
+    incomplete = [e for e in entries if isinstance(e, TodoItem) and not e.done]
+    return [f'- [ ] {i + 1}. {item.text}' for i, item in enumerate(incomplete)]
 
 
 def cmd_add(entries: list[Entry], text: str) -> str:

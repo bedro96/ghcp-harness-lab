@@ -2,7 +2,7 @@
 import unittest
 import tempfile
 import os
-from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file
+from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list
 
 
 class TestParse(unittest.TestCase):
@@ -92,6 +92,45 @@ class TestLoadSaveFile(unittest.TestCase):
         save_file(self.path, original)
         loaded = load_file(self.path)
         self.assertEqual(loaded, original)
+
+
+class TestCmdList(unittest.TestCase):
+    def test_empty_entries(self):
+        self.assertEqual(cmd_list([]), [])
+
+    def test_all_done(self):
+        entries = [TodoItem(text='done task', done=True)]
+        self.assertEqual(cmd_list(entries), [])
+
+    def test_single_incomplete(self):
+        entries = [TodoItem(text='buy milk', done=False)]
+        self.assertEqual(cmd_list(entries), ['- [ ] 1. buy milk'])
+
+    def test_multiple_incomplete(self):
+        entries = [
+            TodoItem(text='task one', done=False),
+            TodoItem(text='task two', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one', '- [ ] 2. task two'])
+
+    def test_skips_done_items_and_renumbers(self):
+        entries = [
+            TodoItem(text='task one', done=False),
+            TodoItem(text='done task', done=True),
+            TodoItem(text='task two', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one', '- [ ] 2. task two'])
+
+    def test_raw_lines_ignored(self):
+        entries = [
+            RawLine(content='# Header'),
+            TodoItem(text='task one', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one'])
+
 
 
 if __name__ == '__main__':

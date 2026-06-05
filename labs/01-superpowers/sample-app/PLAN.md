@@ -2,691 +2,836 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `mdtodo`, a standard-library Python CLI that manages a markdown checkbox todo file.
+**Goal:** Build a single-module Python CLI (`mdtodo.py`) that manages a markdown checkbox todo file via `add`, `list`, and `done` commands.
 
-**Architecture:** Use one focused module, `mdtodo.py`, with `main(argv=None)` for CLI dispatch, file helpers for path/read/write behavior, and pure helpers for parsing checkbox lines. Tests drive the public CLI behavior through `main()` while isolating filesystem and environment state.
+**Architecture:** Parse the file into a list of `Entry` objects (`TodoItem` or `RawLine`), mutate the list in memory, then serialize and write back. Each command is a pure function operating on the list — no filesystem I/O in command logic.
 
-**Tech Stack:** Python 3.10+, standard library only, `unittest`, `tempfile`, `contextlib`, `io`, `os`, `pathlib`.
-
----
-
-## File Structure
-
-- `mdtodo.py` — single CLI module runnable with `python3 -m mdtodo`.
-- `tests/test_mdtodo.py` — unit tests for command behavior, filesystem behavior, stdout/stderr, and exit codes.
-- `README.md` — short usage guide, no more than 30 lines.
-- `RETRO.md` — lab retrospective, filled in after review.
+**Tech Stack:** Python 3.10+ standard library only (`re`, `os`, `sys`, `pathlib`, `dataclasses`, `unittest`, `subprocess`, `tempfile`).
 
 ---
 
-## Task 1: Add and list behavior
+## File Map
+
+| File | Action | Responsibility |
+|---|---|---|
+| `mdtodo.py` | Create | All logic: data model, parse/serialize, commands, `main()` |
+| `tests/__init__.py` | Create | Makes `tests/` a package |
+| `tests/test_mdtodo.py` | Create | All unit + integration + end-to-end tests |
+
+---
+
+### Task 1: Project Skeleton
 
 **Files:**
-- Create: `tests/test_mdtodo.py`
 - Create: `mdtodo.py`
+- Create: `tests/__init__.py`
+- Create: `tests/test_mdtodo.py`
 
-- [ ] **Step 1: Write failing tests for `add`, `list`, and missing files**
+- [ ] **Step 1: Create `tests/__init__.py` (empty)**
 
-Create `tests/test_mdtodo.py`:
+```bash
+touch tests/__init__.py
+```
+
+- [ ] **Step 2: Create skeleton `mdtodo.py`**
 
 ```python
-import io
-import os
-import tempfile
-import unittest
+# mdtodo.py
+from __future__ import annotations
+from dataclasses import dataclass
 from pathlib import Path
-from unittest import mock
-
-import mdtodo
-
-
-class CliTestCase(unittest.TestCase):
-    def run_cli(self, args, *, todo_file=None, cwd=None):
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        env = {}
-        if todo_file is not None:
-            env["MDTODO_FILE"] = str(todo_file)
-
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("sys.stdout", stdout), mock.patch("sys.stderr", stderr):
-                if cwd is None:
-                    code = mdtodo.main(args)
-                else:
-                    old_cwd = os.getcwd()
-                    try:
-                        os.chdir(cwd)
-                        code = mdtodo.main(args)
-                    finally:
-                        os.chdir(old_cwd)
-
-        return code, stdout.getvalue(), stderr.getvalue()
+from typing import Union
+import os
+import re
+import sys
 
 
-class AddAndListTests(CliTestCase):
-    def test_add_creates_missing_file_and_reports_new_number(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-
-            code, stdout, stderr = self.run_cli(
-                ["add", "랩 02 진행"],
-                todo_file=todo_file,
-            )
-
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Added #1: 랩 02 진행\n")
-            self.assertEqual(stderr, "")
-            self.assertEqual(todo_file.read_text(encoding="utf-8"), "- [ ] 랩 02 진행\n")
-
-    def test_add_number_counts_existing_incomplete_items(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text(
-                "- [ ] 랩 01 README 읽기\n- [x] 완료한 일\n- [ ] Superpowers 설치\n",
-                encoding="utf-8",
-            )
-
-            code, stdout, stderr = self.run_cli(
-                ["add", "랩 02 진행"],
-                todo_file=todo_file,
-            )
-
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Added #3: 랩 02 진행\n")
-            self.assertEqual(stderr, "")
-            self.assertEqual(
-                todo_file.read_text(encoding="utf-8"),
-                "- [ ] 랩 01 README 읽기\n"
-                "- [x] 완료한 일\n"
-                "- [ ] Superpowers 설치\n"
-                "- [ ] 랩 02 진행\n",
-            )
-
-    def test_list_prints_only_incomplete_items_renumbered(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text(
-                "# Tasks\n"
-                "- [ ] 랩 01 README 읽기\n"
-                "- [x] 완료한 일\n"
-                "notes stay in the file\n"
-                "- [ ] Superpowers 설치\n",
-                encoding="utf-8",
-            )
-
-            code, stdout, stderr = self.run_cli(["list"], todo_file=todo_file)
-
-            self.assertEqual(code, 0)
-            self.assertEqual(
-                stdout,
-                "- [ ] 1. 랩 01 README 읽기\n"
-                "- [ ] 2. Superpowers 설치\n",
-            )
-            self.assertEqual(stderr, "")
-
-    def test_list_missing_file_prints_nothing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-
-            code, stdout, stderr = self.run_cli(["list"], todo_file=todo_file)
-
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "")
-            self.assertEqual(stderr, "")
-            self.assertFalse(todo_file.exists())
+@dataclass
+class TodoItem:
+    text: str
+    done: bool
 
 
-if __name__ == "__main__":
+@dataclass
+class RawLine:
+    content: str
+
+
+Entry = Union[TodoItem, RawLine]
+
+TODO_RE = re.compile(r'^- \[([ x])\] (.+)$')
+
+DEFAULT_FILE = './tasks.md'
+
+
+def parse(text: str) -> list[Entry]:
+    raise NotImplementedError
+
+
+def serialize(entries: list[Entry]) -> str:
+    raise NotImplementedError
+
+
+def load_file(path: str) -> list[Entry]:
+    raise NotImplementedError
+
+
+def save_file(path: str, entries: list[Entry]) -> None:
+    raise NotImplementedError
+
+
+def cmd_list(entries: list[Entry]) -> list[str]:
+    raise NotImplementedError
+
+
+def cmd_add(entries: list[Entry], text: str) -> str:
+    raise NotImplementedError
+
+
+def cmd_done(entries: list[Entry], n: int) -> str:
+    raise NotImplementedError
+
+
+def main() -> None:
+    raise NotImplementedError
+
+
+if __name__ == '__main__':
+    main()
+```
+
+- [ ] **Step 3: Create skeleton `tests/test_mdtodo.py`**
+
+```python
+# tests/test_mdtodo.py
+import unittest
+
+
+class TestParseSkeleton(unittest.TestCase):
+    def test_placeholder(self):
+        self.assertTrue(True)
+
+
+if __name__ == '__main__':
+    unittest.main()
+```
+
+- [ ] **Step 4: Verify skeleton runs**
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+Expected: `Ran 1 test in ...OK`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add mdtodo.py tests/__init__.py tests/test_mdtodo.py
+git commit -m "chore: project skeleton"
+```
+
+---
+
+### Task 2: parse() and serialize()
+
+**Files:**
+- Modify: `mdtodo.py` — implement `parse()` and `serialize()`
+- Modify: `tests/test_mdtodo.py` — add parse/serialize tests
+
+- [ ] **Step 1: Write the failing tests**
+
+Replace the contents of `tests/test_mdtodo.py` with:
+
+```python
+# tests/test_mdtodo.py
+import unittest
+from mdtodo import parse, serialize, TodoItem, RawLine
+
+
+class TestParse(unittest.TestCase):
+    def test_empty_string(self):
+        self.assertEqual(parse(''), [])
+
+    def test_single_incomplete(self):
+        result = parse('- [ ] buy milk')
+        self.assertEqual(result, [TodoItem(text='buy milk', done=False)])
+
+    def test_single_done(self):
+        result = parse('- [x] buy milk')
+        self.assertEqual(result, [TodoItem(text='buy milk', done=True)])
+
+    def test_raw_line_preserved(self):
+        result = parse('# My Tasks')
+        self.assertEqual(result, [RawLine(content='# My Tasks')])
+
+    def test_blank_line_preserved(self):
+        result = parse('\n')
+        self.assertEqual(result, [RawLine(content=''), RawLine(content='')])
+
+    def test_mixed_content(self):
+        text = '# Tasks\n- [ ] task one\n- [x] task two'
+        result = parse(text)
+        self.assertEqual(result, [
+            RawLine(content='# Tasks'),
+            TodoItem(text='task one', done=False),
+            TodoItem(text='task two', done=True),
+        ])
+
+
+class TestSerialize(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(serialize([]), '')
+
+    def test_incomplete_item(self):
+        entries = [TodoItem(text='buy milk', done=False)]
+        self.assertEqual(serialize(entries), '- [ ] buy milk\n')
+
+    def test_done_item(self):
+        entries = [TodoItem(text='buy milk', done=True)]
+        self.assertEqual(serialize(entries), '- [x] buy milk\n')
+
+    def test_raw_line(self):
+        entries = [RawLine(content='# Header')]
+        self.assertEqual(serialize(entries), '# Header\n')
+
+    def test_round_trip(self):
+        text = '# Tasks\n- [ ] task one\n- [x] task two\n'
+        self.assertEqual(serialize(parse(text)), text)
+
+
+if __name__ == '__main__':
     unittest.main()
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run:
-
 ```bash
 python3 -m unittest discover -s tests
 ```
 
-Expected: FAIL because `mdtodo` does not exist yet.
+Expected: multiple errors with `NotImplementedError`
 
-- [ ] **Step 3: Write minimal implementation for `add` and `list`**
+- [ ] **Step 3: Implement `parse()` and `serialize()` in `mdtodo.py`**
 
-Create `mdtodo.py`:
+Replace the stub bodies:
 
 ```python
+def parse(text: str) -> list[Entry]:
+    entries: list[Entry] = []
+    for line in text.splitlines():
+        m = TODO_RE.match(line)
+        if m:
+            entries.append(TodoItem(text=m.group(2), done=m.group(1) == 'x'))
+        else:
+            entries.append(RawLine(content=line))
+    return entries
+
+
+def serialize(entries: list[Entry]) -> str:
+    if not entries:
+        return ''
+    lines = []
+    for e in entries:
+        if isinstance(e, TodoItem):
+            mark = 'x' if e.done else ' '
+            lines.append(f'- [{mark}] {e.text}')
+        else:
+            lines.append(e.content)
+    return '\n'.join(lines) + '\n'
+```
+
+- [ ] **Step 4: Run tests and verify they pass**
+
+```bash
+python3 -m unittest tests.test_mdtodo.TestParse tests.test_mdtodo.TestSerialize -v
+```
+
+Expected: all `TestParse` and `TestSerialize` tests `OK`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add mdtodo.py tests/test_mdtodo.py
+git commit -m "feat: implement parse() and serialize()"
+```
+
+---
+
+### Task 3: load_file() and save_file()
+
+**Files:**
+- Modify: `mdtodo.py` — implement `load_file()` and `save_file()`
+- Modify: `tests/test_mdtodo.py` — append filesystem tests
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_mdtodo.py` (before `if __name__ == '__main__':`):
+
+```python
+import tempfile
 import os
-import sys
-from dataclasses import dataclass
-from pathlib import Path
+from mdtodo import load_file, save_file
 
 
-@dataclass(frozen=True)
-class TodoLine:
-    source_index: int
-    done: bool
-    text: str
+class TestLoadSaveFile(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False
+        )
+        self.path = self.tmp.name
+        self.tmp.close()
+        os.unlink(self.path)  # start with no file
 
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
 
-def todo_path():
-    return Path(os.environ.get("MDTODO_FILE", "./tasks.md"))
+    def test_load_creates_file_when_missing(self):
+        self.assertFalse(os.path.exists(self.path))
+        entries = load_file(self.path)
+        self.assertTrue(os.path.exists(self.path))
+        self.assertEqual(entries, [])
 
+    def test_load_reads_existing_content(self):
+        with open(self.path, 'w') as f:
+            f.write('- [ ] hello\n')
+        entries = load_file(self.path)
+        self.assertEqual(entries, [TodoItem(text='hello', done=False)])
 
-def read_lines(path):
-    if not path.exists():
+    def test_save_writes_content(self):
+        entries = [TodoItem(text='hello', done=False)]
+        save_file(self.path, entries)
+        with open(self.path) as f:
+            self.assertEqual(f.read(), '- [ ] hello\n')
+
+    def test_round_trip_through_files(self):
+        original = [TodoItem(text='a', done=False), TodoItem(text='b', done=True)]
+        save_file(self.path, original)
+        loaded = load_file(self.path)
+        self.assertEqual(loaded, original)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+```bash
+python3 -m unittest tests.test_mdtodo.TestLoadSaveFile -v
+```
+
+Expected: errors with `NotImplementedError`
+
+- [ ] **Step 3: Implement `load_file()` and `save_file()` in `mdtodo.py`**
+
+```python
+def load_file(path: str) -> list[Entry]:
+    p = Path(path)
+    if not p.exists():
+        p.touch()
         return []
-    with path.open(encoding="utf-8", newline="") as file:
-        return file.read().splitlines(keepends=True)
+    return parse(p.read_text())
 
 
-def write_lines(path, lines):
-    with path.open("w", encoding="utf-8", newline="") as file:
-        file.write("".join(lines))
-
-
-def trailing_newline(line):
-    if line.endswith("\r\n"):
-        return "\r\n"
-    if line.endswith("\n"):
-        return "\n"
-    if line.endswith("\r"):
-        return "\r"
-    return ""
-
-
-def parse_todo_line(index, line):
-    body = line.rstrip("\n")
-    if body.endswith("\r"):
-        body = body[:-1]
-    if body.startswith("- [ ] "):
-        return TodoLine(index, False, body[len("- [ ] "):])
-    if body.startswith("- [x] "):
-        return TodoLine(index, True, body[len("- [x] "):])
-    return None
-
-
-def todo_lines(lines):
-    parsed = []
-    for index, line in enumerate(lines):
-        todo = parse_todo_line(index, line)
-        if todo is not None:
-            parsed.append(todo)
-    return parsed
-
-
-def incomplete_todos(lines):
-    return [todo for todo in todo_lines(lines) if not todo.done]
-
-
-def command_add(text):
-    path = todo_path()
-    lines = read_lines(path)
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] = lines[-1] + "\n"
-    lines.append(f"- [ ] {text}\n")
-    write_lines(path, lines)
-    number = len(incomplete_todos(lines))
-    print(f"Added #{number}: {text}")
-    return 0
-
-
-def command_list():
-    lines = read_lines(todo_path())
-    for number, todo in enumerate(incomplete_todos(lines), start=1):
-        print(f"- [ ] {number}. {todo.text}")
-    return 0
-
-
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-
-    if len(argv) >= 2 and argv[0] == "add":
-        return command_add(" ".join(argv[1:]))
-    if len(argv) == 1 and argv[0] == "list":
-        return command_list()
-
-    print("Usage: mdtodo add TEXT | list | done N", file=sys.stderr)
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def save_file(path: str, entries: list[Entry]) -> None:
+    Path(path).write_text(serialize(entries))
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+Also add `from pathlib import Path` at the top if not already present (it is in the skeleton).
 
-Run:
+- [ ] **Step 4: Run tests and verify they pass**
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest tests.test_mdtodo.TestLoadSaveFile -v
 ```
 
-Expected: all 4 tests pass.
+Expected: all `TestLoadSaveFile` tests `OK`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Add mdtodo add and list commands
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "feat: implement load_file() and save_file()"
 ```
 
 ---
 
-## Task 2: Done behavior and invalid indexes
+### Task 4: cmd_list()
 
 **Files:**
-- Modify: `tests/test_mdtodo.py`
-- Modify: `mdtodo.py`
+- Modify: `mdtodo.py` — implement `cmd_list()`
+- Modify: `tests/test_mdtodo.py` — append cmd_list tests
 
-- [ ] **Step 1: Write failing tests for `done`**
+- [ ] **Step 1: Write the failing tests**
 
-Append the following class inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
+Append to `tests/test_mdtodo.py`:
 
 ```python
-class DoneTests(CliTestCase):
-    def test_done_preserves_crlf_line_endings_when_rewriting_item(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_bytes(b"- [ ] first\r\n- [ ] second\r\n")
+from mdtodo import cmd_list
 
-            code, stdout, stderr = self.run_cli(["done", "1"], todo_file=todo_file)
 
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Done: first\n")
-            self.assertEqual(stderr, "")
-            self.assertEqual(
-                todo_file.read_bytes(),
-                b"- [x] first\r\n- [ ] second\r\n",
-            )
+class TestCmdList(unittest.TestCase):
+    def test_empty_entries(self):
+        self.assertEqual(cmd_list([]), [])
 
-    def test_done_marks_nth_incomplete_item_and_preserves_other_lines(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text(
-                "# Tasks\n"
-                "- [ ] 랩 01 README 읽기\n"
-                "- [x] 이미 완료\n"
-                "plain note\n"
-                "- [ ] Superpowers 설치\n"
-                "- [ ] 랩 02 진행\n",
-                encoding="utf-8",
-            )
+    def test_all_done(self):
+        entries = [TodoItem(text='done task', done=True)]
+        self.assertEqual(cmd_list(entries), [])
 
-            code, stdout, stderr = self.run_cli(["done", "2"], todo_file=todo_file)
+    def test_single_incomplete(self):
+        entries = [TodoItem(text='buy milk', done=False)]
+        self.assertEqual(cmd_list(entries), ['- [ ] 1. buy milk'])
 
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Done: Superpowers 설치\n")
-            self.assertEqual(stderr, "")
-            self.assertEqual(
-                todo_file.read_text(encoding="utf-8"),
-                "# Tasks\n"
-                "- [ ] 랩 01 README 읽기\n"
-                "- [x] 이미 완료\n"
-                "plain note\n"
-                "- [x] Superpowers 설치\n"
-                "- [ ] 랩 02 진행\n",
-            )
+    def test_multiple_incomplete(self):
+        entries = [
+            TodoItem(text='task one', done=False),
+            TodoItem(text='task two', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one', '- [ ] 2. task two'])
 
-    def test_done_then_list_renumbers_remaining_incomplete_items(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text(
-                "- [ ] 랩 01 README 읽기\n"
-                "- [ ] Superpowers 설치\n"
-                "- [ ] 랩 02 진행\n",
-                encoding="utf-8",
-            )
+    def test_skips_done_items_and_renumbers(self):
+        entries = [
+            TodoItem(text='task one', done=False),
+            TodoItem(text='done task', done=True),
+            TodoItem(text='task two', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one', '- [ ] 2. task two'])
 
-            done_code, done_stdout, done_stderr = self.run_cli(["done", "2"], todo_file=todo_file)
-            list_code, list_stdout, list_stderr = self.run_cli(["list"], todo_file=todo_file)
-
-            self.assertEqual(done_code, 0)
-            self.assertEqual(done_stdout, "Done: Superpowers 설치\n")
-            self.assertEqual(done_stderr, "")
-            self.assertEqual(list_code, 0)
-            self.assertEqual(
-                list_stdout,
-                "- [ ] 1. 랩 01 README 읽기\n"
-                "- [ ] 2. 랩 02 진행\n",
-            )
-            self.assertEqual(list_stderr, "")
-
-    def test_done_rejects_non_integer_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text("- [ ] one\n", encoding="utf-8")
-
-            code, stdout, stderr = self.run_cli(["done", "abc"], todo_file=todo_file)
-
-            self.assertEqual(code, 1)
-            self.assertEqual(stdout, "")
-            self.assertEqual(stderr, "Invalid todo number: abc\n")
-            self.assertEqual(todo_file.read_text(encoding="utf-8"), "- [ ] one\n")
-
-    def test_done_rejects_out_of_range_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-            todo_file.write_text("- [ ] one\n", encoding="utf-8")
-
-            code, stdout, stderr = self.run_cli(["done", "2"], todo_file=todo_file)
-
-            self.assertEqual(code, 1)
-            self.assertEqual(stdout, "")
-            self.assertEqual(stderr, "Invalid todo number: 2\n")
-            self.assertEqual(todo_file.read_text(encoding="utf-8"), "- [ ] one\n")
-
-    def test_done_missing_file_is_invalid_index(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            todo_file = Path(tmp) / "tasks.md"
-
-            code, stdout, stderr = self.run_cli(["done", "1"], todo_file=todo_file)
-
-            self.assertEqual(code, 1)
-            self.assertEqual(stdout, "")
-            self.assertEqual(stderr, "Invalid todo number: 1\n")
-            self.assertFalse(todo_file.exists())
+    def test_raw_lines_ignored(self):
+        entries = [
+            RawLine(content='# Header'),
+            TodoItem(text='task one', done=False),
+        ]
+        result = cmd_list(entries)
+        self.assertEqual(result, ['- [ ] 1. task one'])
 ```
 
-- [ ] **Step 2: Run tests to verify the new tests fail**
-
-Run:
+- [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest tests.test_mdtodo.TestCmdList -v
 ```
 
-Expected: FAIL because `done` is not yet implemented.
+Expected: errors with `NotImplementedError`
 
-- [ ] **Step 3: Implement `done N` in `mdtodo.py`**
-
-Add the following functions before `main()` in `mdtodo.py`:
+- [ ] **Step 3: Implement `cmd_list()` in `mdtodo.py`**
 
 ```python
-def invalid_number(raw_number):
-    print(f"Invalid todo number: {raw_number}", file=sys.stderr)
-    return 1
-
-
-def command_done(raw_number):
-    try:
-        number = int(raw_number)
-    except ValueError:
-        return invalid_number(raw_number)
-
-    if number < 1:
-        return invalid_number(raw_number)
-
-    path = todo_path()
-    lines = read_lines(path)
-    incomplete = incomplete_todos(lines)
-    if number > len(incomplete):
-        return invalid_number(raw_number)
-
-    todo = incomplete[number - 1]
-    original_line = lines[todo.source_index]
-    lines[todo.source_index] = f"- [x] {todo.text}{trailing_newline(original_line)}"
-    write_lines(path, lines)
-    print(f"Done: {todo.text}")
-    return 0
+def cmd_list(entries: list[Entry]) -> list[str]:
+    incomplete = [e for e in entries if isinstance(e, TodoItem) and not e.done]
+    return [f'- [ ] {i + 1}. {item.text}' for i, item in enumerate(incomplete)]
 ```
 
-Then update `main()` to handle the `done` command:
-
-```python
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-
-    if len(argv) >= 2 and argv[0] == "add":
-        return command_add(" ".join(argv[1:]))
-    if len(argv) == 1 and argv[0] == "list":
-        return command_list()
-    if len(argv) == 2 and argv[0] == "done":
-        return command_done(argv[1])
-
-    print("Usage: mdtodo add TEXT | list | done N", file=sys.stderr)
-    return 1
-```
-
-- [ ] **Step 4: Run tests to verify they all pass**
-
-Run:
+- [ ] **Step 4: Run tests and verify they pass**
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest tests.test_mdtodo.TestCmdList -v
 ```
 
-Expected: all 10 tests pass.
+Expected: all `TestCmdList` tests `OK`
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Add mdtodo done command
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "feat: implement cmd_list()"
 ```
 
 ---
 
-## Task 3: Default path, command shape, and module execution
+### Task 5: cmd_add()
 
 **Files:**
-- Modify: `tests/test_mdtodo.py`
-- Modify: `mdtodo.py`
+- Modify: `mdtodo.py` — implement `cmd_add()`
+- Modify: `tests/test_mdtodo.py` — append cmd_add tests
 
-- [ ] **Step 1: Write tests for default path and CLI shape**
+- [ ] **Step 1: Write the failing tests**
 
-Append the following class inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
+Append to `tests/test_mdtodo.py`:
 
 ```python
-class PathAndCliTests(CliTestCase):
-    def test_default_path_is_tasks_md_in_current_directory(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            code, stdout, stderr = self.run_cli(
-                ["add", "default path task"],
-                cwd=tmp,
-            )
+from mdtodo import cmd_add
 
-            self.assertEqual(code, 0)
-            self.assertEqual(stdout, "Added #1: default path task\n")
-            self.assertEqual(stderr, "")
-            self.assertEqual(
-                (Path(tmp) / "tasks.md").read_text(encoding="utf-8"),
-                "- [ ] default path task\n",
-            )
 
-    def test_no_arguments_prints_usage_to_stderr(self):
-        code, stdout, stderr = self.run_cli([])
+class TestCmdAdd(unittest.TestCase):
+    def test_add_to_empty(self):
+        entries: list = []
+        msg = cmd_add(entries, 'buy milk')
+        self.assertEqual(msg, 'Added #1: buy milk')
+        self.assertEqual(entries, [TodoItem(text='buy milk', done=False)])
 
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
+    def test_add_increments_total_count(self):
+        entries = [TodoItem(text='existing', done=False)]
+        msg = cmd_add(entries, 'new task')
+        self.assertEqual(msg, 'Added #2: new task')
 
-    def test_add_without_text_prints_usage_to_stderr(self):
-        code, stdout, stderr = self.run_cli(["add"])
+    def test_add_counts_done_items_too(self):
+        entries = [TodoItem(text='done', done=True)]
+        msg = cmd_add(entries, 'new task')
+        self.assertEqual(msg, 'Added #2: new task')
 
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
-
-    def test_done_with_extra_argument_prints_usage_to_stderr(self):
-        code, stdout, stderr = self.run_cli(["done", "1", "extra"])
-
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
+    def test_add_appends_to_end(self):
+        entries = [
+            TodoItem(text='first', done=False),
+            RawLine(content='# section'),
+        ]
+        cmd_add(entries, 'last')
+        self.assertIsInstance(entries[-1], TodoItem)
+        self.assertEqual(entries[-1].text, 'last')
 ```
 
-- [ ] **Step 2: Run tests to verify they pass**
-
-Run:
+- [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest tests.test_mdtodo.TestCmdAdd -v
 ```
 
-Expected: all 14 tests pass. If any fail, the command shape or default path logic in `main()` needs adjustment.
+Expected: errors with `NotImplementedError`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Implement `cmd_add()` in `mdtodo.py`**
+
+```python
+def cmd_add(entries: list[Entry], text: str) -> str:
+    entries.append(TodoItem(text=text, done=False))
+    total = sum(1 for e in entries if isinstance(e, TodoItem))
+    return f'Added #{total}: {text}'
+```
+
+- [ ] **Step 4: Run tests and verify they pass**
+
+```bash
+python3 -m unittest tests.test_mdtodo.TestCmdAdd -v
+```
+
+Expected: all `TestCmdAdd` tests `OK`
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Cover mdtodo path and usage behavior
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "feat: implement cmd_add()"
 ```
 
 ---
 
-## Task 4: README
+### Task 6: cmd_done()
 
 **Files:**
-- Create: `README.md`
+- Modify: `mdtodo.py` — implement `cmd_done()`
+- Modify: `tests/test_mdtodo.py` — append cmd_done tests
 
-- [ ] **Step 1: Create the short README**
+- [ ] **Step 1: Write the failing tests**
 
-Create `README.md`:
+Append to `tests/test_mdtodo.py`:
 
-```markdown
-# mdtodo
+```python
+from mdtodo import cmd_done
 
-Small Python CLI for managing markdown checkbox todos.
 
-## Usage
+class TestCmdDone(unittest.TestCase):
+    def test_marks_first_item_done(self):
+        entries = [TodoItem(text='task one', done=False)]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: task one')
+        self.assertTrue(entries[0].done)
+
+    def test_marks_second_incomplete_done(self):
+        entries = [
+            TodoItem(text='first', done=False),
+            TodoItem(text='second', done=False),
+        ]
+        msg = cmd_done(entries, 2)
+        self.assertEqual(msg, 'Done #2: second')
+        self.assertFalse(entries[0].done)
+        self.assertTrue(entries[1].done)
+
+    def test_skips_already_done_items(self):
+        entries = [
+            TodoItem(text='already done', done=True),
+            TodoItem(text='target', done=False),
+        ]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: target')
+        self.assertTrue(entries[1].done)
+
+    def test_invalid_n_zero_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, 0)
+
+    def test_invalid_n_too_large_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, 2)
+
+    def test_invalid_n_negative_raises(self):
+        entries = [TodoItem(text='task', done=False)]
+        with self.assertRaises(ValueError):
+            cmd_done(entries, -1)
+
+    def test_empty_list_raises(self):
+        with self.assertRaises(ValueError):
+            cmd_done([], 1)
+
+    def test_raw_lines_ignored(self):
+        entries = [
+            RawLine(content='# header'),
+            TodoItem(text='the task', done=False),
+        ]
+        msg = cmd_done(entries, 1)
+        self.assertEqual(msg, 'Done #1: the task')
+        self.assertTrue(entries[1].done)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python3 -m mdtodo add "랩 02 진행"
-python3 -m mdtodo list
-python3 -m mdtodo done 2
+python3 -m unittest tests.test_mdtodo.TestCmdDone -v
 ```
 
-By default, `mdtodo` reads and writes `./tasks.md`.
-Set `MDTODO_FILE` to use another file:
+Expected: errors with `NotImplementedError`
+
+- [ ] **Step 3: Implement `cmd_done()` in `mdtodo.py`**
+
+```python
+def cmd_done(entries: list[Entry], n: int) -> str:
+    incomplete = [
+        (i, e) for i, e in enumerate(entries)
+        if isinstance(e, TodoItem) and not e.done
+    ]
+    if n < 1 or n > len(incomplete):
+        raise ValueError(n)
+    idx, item = incomplete[n - 1]
+    entries[idx] = TodoItem(text=item.text, done=True)
+    return f'Done #{n}: {item.text}'
+```
+
+- [ ] **Step 4: Run tests and verify they pass**
 
 ```bash
-MDTODO_FILE=/tmp/tasks.md python3 -m mdtodo list
+python3 -m unittest tests.test_mdtodo.TestCmdDone -v
 ```
 
-Todo lines use markdown checkbox syntax:
+Expected: all `TestCmdDone` tests `OK`
 
-```markdown
-- [ ] incomplete task
-- [x] completed task
-```
-
-`list` shows only incomplete items and renumbers them from 1.
-```
-
-- [ ] **Step 2: Verify README length is ≤ 30 lines**
-
-Run:
+- [ ] **Step 5: Commit**
 
 ```bash
-python3 -c "
-from pathlib import Path
-lines = Path('README.md').read_text(encoding='utf-8').splitlines()
-print(len(lines))
-raise SystemExit(0 if len(lines) <= 30 else 1)
-"
+git add mdtodo.py tests/test_mdtodo.py
+git commit -m "feat: implement cmd_done()"
 ```
 
-Expected: prints a number ≤ 30 and exits 0.
+---
 
-- [ ] **Step 3: Run the full test suite**
+### Task 7: main() and end-to-end tests
 
-Run:
+**Files:**
+- Modify: `mdtodo.py` — implement `main()`
+- Modify: `tests/test_mdtodo.py` — append end-to-end tests via subprocess
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_mdtodo.py`:
+
+```python
+import subprocess
+import sys
+
+
+class TestMainEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False
+        )
+        self.path = self.tmp.name
+        self.tmp.close()
+        os.unlink(self.path)
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def run_cmd(self, *args):
+        import os
+        env = os.environ.copy()
+        env['MDTODO_FILE'] = self.path
+        result = subprocess.run(
+            [sys.executable, '-m', 'mdtodo'] + list(args),
+            capture_output=True, text=True, env=env,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+
+    def test_add_creates_file_and_prints(self):
+        out, err, rc = self.run_cmd('add', 'buy milk')
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, 'Added #1: buy milk')
+        self.assertTrue(os.path.exists(self.path))
+
+    def test_list_empty_prints_nothing(self):
+        out, err, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, '')
+
+    def test_add_then_list(self):
+        self.run_cmd('add', 'task one')
+        self.run_cmd('add', 'task two')
+        out, err, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertIn('1. task one', out)
+        self.assertIn('2. task two', out)
+
+    def test_done_marks_item(self):
+        self.run_cmd('add', 'task one')
+        self.run_cmd('add', 'task two')
+        out, err, rc = self.run_cmd('done', '1')
+        self.assertEqual(rc, 0)
+        self.assertIn('Done #1: task one', out)
+        list_out, _, _ = self.run_cmd('list')
+        self.assertNotIn('task one', list_out)
+        self.assertIn('task two', list_out)
+
+    def test_done_invalid_n_exits_1(self):
+        out, err, rc = self.run_cmd('done', '99')
+        self.assertEqual(rc, 1)
+        self.assertIn('Error: no item #99', err)
+
+    def test_done_non_integer_exits_1(self):
+        out, err, rc = self.run_cmd('done', 'abc')
+        self.assertEqual(rc, 1)
+        self.assertIn('Error: no item #abc', err)
+
+    def test_unknown_command_exits_1(self):
+        out, err, rc = self.run_cmd('foobar')
+        self.assertEqual(rc, 1)
+        self.assertIn('foobar', err)
+
+    def test_no_args_exits_1(self):
+        out, err, rc = self.run_cmd()
+        self.assertEqual(rc, 1)
+
+    def test_full_scenario_from_brief(self):
+        """Validates the exact scenario in BRIEF.md."""
+        self.run_cmd('add', '랩 01 README 읽기')
+        self.run_cmd('add', 'Superpowers 설치')
+        self.run_cmd('add', '랩 02 진행')
+        list_out, _, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertIn('1. 랩 01 README 읽기', list_out)
+        self.assertIn('2. Superpowers 설치', list_out)
+        self.assertIn('3. 랩 02 진행', list_out)
+        done_out, _, rc = self.run_cmd('done', '2')
+        self.assertEqual(rc, 0)
+        self.assertIn('Done #2: Superpowers 설치', done_out)
+        list_out2, _, _ = self.run_cmd('list')
+        self.assertIn('1. 랩 01 README 읽기', list_out2)
+        self.assertIn('2. 랩 02 진행', list_out2)
+        self.assertNotIn('Superpowers 설치', list_out2)
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest tests.test_mdtodo.TestMainEndToEnd -v
 ```
 
-Expected: all 14 tests pass.
+Expected: errors with `NotImplementedError` from `main()`
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Implement `main()` in `mdtodo.py`**
+
+```python
+def main() -> None:
+    args = sys.argv[1:]
+    if not args:
+        print('Usage: python3 -m mdtodo <add|list|done> [args]', file=sys.stderr)
+        sys.exit(1)
+
+    path = os.environ.get('MDTODO_FILE', DEFAULT_FILE)
+    cmd = args[0]
+    entries = load_file(path)
+
+    if cmd == 'add':
+        if len(args) != 2:
+            print('Usage: python3 -m mdtodo add <text>', file=sys.stderr)
+            sys.exit(1)
+        print(cmd_add(entries, args[1]))
+        save_file(path, entries)
+
+    elif cmd == 'list':
+        if len(args) != 1:
+            print('Usage: python3 -m mdtodo list', file=sys.stderr)
+            sys.exit(1)
+        for line in cmd_list(entries):
+            print(line)
+
+    elif cmd == 'done':
+        if len(args) != 2:
+            print('Usage: python3 -m mdtodo done <N>', file=sys.stderr)
+            sys.exit(1)
+        try:
+            n = int(args[1])
+        except ValueError:
+            print(f'Error: no item #{args[1]}', file=sys.stderr)
+            sys.exit(1)
+        try:
+            print(cmd_done(entries, n))
+        except ValueError:
+            print(f'Error: no item #{n}', file=sys.stderr)
+            sys.exit(1)
+        save_file(path, entries)
+
+    else:
+        print(f'Unknown command: {cmd}', file=sys.stderr)
+        print('Usage: python3 -m mdtodo <add|list|done> [args]', file=sys.stderr)
+        sys.exit(1)
+```
+
+- [ ] **Step 4: Run all tests and verify they pass**
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Expected: all tests `OK`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add mdtodo.py tests/test_mdtodo.py
+git commit -m "feat: implement main() and end-to-end tests"
+```
+
+---
+
+### Task 8: Update README
+
+**Files:**
+- Modify: `README.md` — ensure content is ≤ 30 lines
+
+- [ ] **Step 1: Verify README is ≤ 30 lines and accurate**
+
+The existing `README.md` already documents the commands. Verify it's complete and accurate. If changes are needed, the README should cover:
+- One-line description
+- Install/run instructions (`python3 -m mdtodo`)
+- All three commands with examples
+- `MDTODO_FILE` env var
+- Todo line format
+
+- [ ] **Step 2: Commit if changed**
 
 ```bash
 git add README.md
-git commit -m "Add mdtodo README
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "docs: update README"
 ```
 
 ---
 
-## Task 5: Retrospective and final verification
+### Final Verification
 
-**Files:**
-- Create: `RETRO.md`
-
-- [ ] **Step 1: Create the lab retrospective**
-
-Create `RETRO.md`:
-
-```markdown
-# mdtodo Retrospective
-
-## What worked
-
-- Brainstorming clarified ambiguous `done` output before implementation.
-- The small layered design kept CLI behavior and parsing easy to test.
-- TDD gave quick feedback for file handling and index edge cases.
-
-## Most useful skill
-
-The brainstorming skill was most useful because it converted a short brief into
-explicit command behavior, missing-file behavior, and preservation rules.
-
-## Follow-up
-
-No follow-up features are needed for this lab. Due dates, priorities, remote
-sync, and TUI behavior remain out of scope.
-```
-
-- [ ] **Step 2: Run final verification**
-
-Run:
+- [ ] Run full test suite:
 
 ```bash
-python3 -m unittest discover -s tests
+python3 -m unittest discover -s tests -v
 ```
 
-Expected: all 14 tests pass.
-
-- [ ] **Step 3: Check all required files exist**
-
-Run:
-
-```bash
-python3 -c "
-from pathlib import Path
-required = ['DESIGN.md', 'PLAN.md', 'RETRO.md', 'README.md', 'mdtodo.py', 'tests/test_mdtodo.py']
-missing = [name for name in required if not Path(name).exists()]
-if missing:
-    print('Missing:', ', '.join(missing))
-    raise SystemExit(1)
-print('All required files exist')
-"
-```
-
-Expected: prints `All required files exist`.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add RETRO.md
-git commit -m "Add mdtodo retrospective
-
-Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
-```
-
----
-
-## Self-Review
-
-- **Spec coverage:** Tasks cover `MDTODO_FILE`, default `./tasks.md`, markdown checkbox parsing, `add`, `list`, `done`, invalid `N`, preservation of non-todo markdown, CRLF line endings, README ≤ 30 lines, DESIGN.md, PLAN.md, and RETRO.md.
-- **Placeholder scan:** No unresolved placeholders in this plan.
-- **Type consistency:** All tasks consistently use `main(argv=None)`, `TodoLine`, `todo_path()`, `read_lines()`, `write_lines()`, `trailing_newline()`, `parse_todo_line()`, `todo_lines()`, `incomplete_todos()`, `invalid_number()`, `command_add()`, `command_list()`, and `command_done()`.
+Expected: all tests pass, exit 0.

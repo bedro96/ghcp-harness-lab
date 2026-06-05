@@ -96,7 +96,49 @@ def cmd_done(entries: list[Entry], n: int) -> str:
 
 
 def main() -> None:
-    raise NotImplementedError
+    args = sys.argv[1:]
+    if not args:
+        print('Usage: python3 -m mdtodo <add|list|done> [args]', file=sys.stderr)
+        sys.exit(1)
+
+    path = os.environ.get('MDTODO_FILE', DEFAULT_FILE)
+    cmd = args[0]
+    entries = load_file(path)
+
+    if cmd == 'add':
+        if len(args) != 2:
+            print('Usage: python3 -m mdtodo add <text>', file=sys.stderr)
+            sys.exit(1)
+        print(cmd_add(entries, args[1]))
+        save_file(path, entries)
+
+    elif cmd == 'list':
+        if len(args) != 1:
+            print('Usage: python3 -m mdtodo list', file=sys.stderr)
+            sys.exit(1)
+        for line in cmd_list(entries):
+            print(line)
+
+    elif cmd == 'done':
+        if len(args) != 2:
+            print('Usage: python3 -m mdtodo done <N>', file=sys.stderr)
+            sys.exit(1)
+        try:
+            n = int(args[1])
+        except ValueError:
+            print(f'Error: no item #{args[1]}', file=sys.stderr)
+            sys.exit(1)
+        try:
+            print(cmd_done(entries, n))
+        except ValueError:
+            print(f'Error: no item #{n}', file=sys.stderr)
+            sys.exit(1)
+        save_file(path, entries)
+
+    else:
+        print(f'Unknown command: {cmd}', file=sys.stderr)
+        print('Usage: python3 -m mdtodo <add|list|done> [args]', file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

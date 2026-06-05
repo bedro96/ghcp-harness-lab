@@ -2,6 +2,8 @@
 import unittest
 import tempfile
 import os
+import subprocess
+import sys
 from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list, cmd_add, cmd_done
 
 
@@ -213,6 +215,96 @@ class TestCmdDone(unittest.TestCase):
         msg = cmd_done(entries, 1)
         self.assertEqual(msg, 'Done #1: the task')
         self.assertTrue(entries[1].done)
+
+
+class TestMainEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False
+        )
+        self.path = self.tmp.name
+        self.tmp.close()
+        os.unlink(self.path)
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def run_cmd(self, *args):
+        env = os.environ.copy()
+        env['MDTODO_FILE'] = self.path
+        result = subprocess.run(
+            [sys.executable, '-m', 'mdtodo'] + list(args),
+            capture_output=True, text=True, env=env,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        )
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+
+    def test_add_creates_file_and_prints(self):
+        out, err, rc = self.run_cmd('add', 'buy milk')
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, 'Added #1: buy milk')
+        self.assertTrue(os.path.exists(self.path))
+
+    def test_list_empty_prints_nothing(self):
+        out, err, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, '')
+
+    def test_add_then_list(self):
+        self.run_cmd('add', 'task one')
+        self.run_cmd('add', 'task two')
+        out, err, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertIn('1. task one', out)
+        self.assertIn('2. task two', out)
+
+    def test_done_marks_item(self):
+        self.run_cmd('add', 'task one')
+        self.run_cmd('add', 'task two')
+        out, err, rc = self.run_cmd('done', '1')
+        self.assertEqual(rc, 0)
+        self.assertIn('Done #1: task one', out)
+        list_out, _, _ = self.run_cmd('list')
+        self.assertNotIn('task one', list_out)
+        self.assertIn('task two', list_out)
+
+    def test_done_invalid_n_exits_1(self):
+        out, err, rc = self.run_cmd('done', '99')
+        self.assertEqual(rc, 1)
+        self.assertIn('Error: no item #99', err)
+
+    def test_done_non_integer_exits_1(self):
+        out, err, rc = self.run_cmd('done', 'abc')
+        self.assertEqual(rc, 1)
+        self.assertIn('Error: no item #abc', err)
+
+    def test_unknown_command_exits_1(self):
+        out, err, rc = self.run_cmd('foobar')
+        self.assertEqual(rc, 1)
+        self.assertIn('foobar', err)
+
+    def test_no_args_exits_1(self):
+        out, err, rc = self.run_cmd()
+        self.assertEqual(rc, 1)
+
+    def test_full_scenario_from_brief(self):
+        """Validates the exact scenario in BRIEF.md."""
+        self.run_cmd('add', '랩 01 README 읽기')
+        self.run_cmd('add', 'Superpowers 설치')
+        self.run_cmd('add', '랩 02 진행')
+        list_out, _, rc = self.run_cmd('list')
+        self.assertEqual(rc, 0)
+        self.assertIn('1. 랩 01 README 읽기', list_out)
+        self.assertIn('2. Superpowers 설치', list_out)
+        self.assertIn('3. 랩 02 진행', list_out)
+        done_out, _, rc = self.run_cmd('done', '2')
+        self.assertEqual(rc, 0)
+        self.assertIn('Done #2: Superpowers 설치', done_out)
+        list_out2, _, _ = self.run_cmd('list')
+        self.assertIn('1. 랩 01 README 읽기', list_out2)
+        self.assertIn('2. 랩 02 진행', list_out2)
+        self.assertNotIn('Superpowers 설치', list_out2)
 
 
 if __name__ == '__main__':

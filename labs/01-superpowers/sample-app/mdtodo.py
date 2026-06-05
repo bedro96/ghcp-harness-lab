@@ -78,7 +78,9 @@ def cmd_list(entries: list[Entry]) -> list[str]:
 
 
 def cmd_add(entries: list[Entry], text: str) -> str:
-    raise NotImplementedError
+    entries.append(TodoItem(text=text, done=False))
+    total = sum(1 for e in entries if isinstance(e, TodoItem))
+    return f'Added #{total}: {text}'
 
 
 def cmd_done(entries: list[Entry], n: int) -> str:

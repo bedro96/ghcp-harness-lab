@@ -2,7 +2,7 @@
 import unittest
 import tempfile
 import os
-from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list
+from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file, cmd_list, cmd_add
 
 
 class TestParse(unittest.TestCase):
@@ -131,6 +131,33 @@ class TestCmdList(unittest.TestCase):
         result = cmd_list(entries)
         self.assertEqual(result, ['- [ ] 1. task one'])
 
+
+
+class TestCmdAdd(unittest.TestCase):
+    def test_add_to_empty(self):
+        entries: list = []
+        msg = cmd_add(entries, 'buy milk')
+        self.assertEqual(msg, 'Added #1: buy milk')
+        self.assertEqual(entries, [TodoItem(text='buy milk', done=False)])
+
+    def test_add_increments_total_count(self):
+        entries = [TodoItem(text='existing', done=False)]
+        msg = cmd_add(entries, 'new task')
+        self.assertEqual(msg, 'Added #2: new task')
+
+    def test_add_counts_done_items_too(self):
+        entries = [TodoItem(text='done', done=True)]
+        msg = cmd_add(entries, 'new task')
+        self.assertEqual(msg, 'Added #2: new task')
+
+    def test_add_appends_to_end(self):
+        entries = [
+            TodoItem(text='first', done=False),
+            RawLine(content='# section'),
+        ]
+        cmd_add(entries, 'last')
+        self.assertIsInstance(entries[-1], TodoItem)
+        self.assertEqual(entries[-1].text, 'last')
 
 
 if __name__ == '__main__':

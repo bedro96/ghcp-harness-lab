@@ -61,11 +61,15 @@ def serialize(entries: list[Entry]) -> str:
 
 
 def load_file(path: str) -> list[Entry]:
-    raise NotImplementedError
+    p = Path(path)
+    if not p.exists():
+        p.touch()
+        return []
+    return parse(p.read_text())
 
 
 def save_file(path: str, entries: list[Entry]) -> None:
-    raise NotImplementedError
+    Path(path).write_text(serialize(entries))
 
 
 def cmd_list(entries: list[Entry]) -> list[str]:

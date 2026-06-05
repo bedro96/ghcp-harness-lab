@@ -1,6 +1,8 @@
 # tests/test_mdtodo.py
 import unittest
-from mdtodo import parse, serialize, TodoItem, RawLine
+import tempfile
+import os
+from mdtodo import parse, serialize, TodoItem, RawLine, load_file, save_file
 
 
 class TestParse(unittest.TestCase):
@@ -52,6 +54,44 @@ class TestSerialize(unittest.TestCase):
     def test_round_trip(self):
         text = '# Tasks\n- [ ] task one\n- [x] task two\n'
         self.assertEqual(serialize(parse(text)), text)
+
+
+class TestLoadSaveFile(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.md', delete=False
+        )
+        self.path = self.tmp.name
+        self.tmp.close()
+        os.unlink(self.path)  # start with no file
+
+    def tearDown(self):
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def test_load_creates_file_when_missing(self):
+        self.assertFalse(os.path.exists(self.path))
+        entries = load_file(self.path)
+        self.assertTrue(os.path.exists(self.path))
+        self.assertEqual(entries, [])
+
+    def test_load_reads_existing_content(self):
+        with open(self.path, 'w') as f:
+            f.write('- [ ] hello\n')
+        entries = load_file(self.path)
+        self.assertEqual(entries, [TodoItem(text='hello', done=False)])
+
+    def test_save_writes_content(self):
+        entries = [TodoItem(text='hello', done=False)]
+        save_file(self.path, entries)
+        with open(self.path) as f:
+            self.assertEqual(f.read(), '- [ ] hello\n')
+
+    def test_round_trip_through_files(self):
+        original = [TodoItem(text='a', done=False), TodoItem(text='b', done=True)]
+        save_file(self.path, original)
+        loaded = load_file(self.path)
+        self.assertEqual(loaded, original)
 
 
 if __name__ == '__main__':

@@ -27,11 +27,37 @@ DEFAULT_FILE = './tasks.md'
 
 
 def parse(text: str) -> list[Entry]:
-    raise NotImplementedError
+    if not text:
+        return []
+    
+    entries: list[Entry] = []
+    lines = text.split('\n')
+    # Remove trailing empty line created by trailing newline, but preserve if all lines are empty
+    if lines and lines[-1] == '' and any(line for line in lines[:-1]):
+        lines = lines[:-1]
+    
+    for line in lines:
+        m = TODO_RE.match(line)
+        if m:
+            entries.append(TodoItem(text=m.group(2), done=m.group(1) == 'x'))
+        else:
+            entries.append(RawLine(content=line))
+    return entries
 
 
 def serialize(entries: list[Entry]) -> str:
-    raise NotImplementedError
+    if not entries:
+        return ''
+    lines = []
+    for e in entries:
+        if isinstance(e, TodoItem):
+            mark = 'x' if e.done else ' '
+            lines.append(f'- [{mark}] {e.text}')
+        else:
+            lines.append(e.content)
+    
+    result = '\n'.join(lines) + '\n'
+    return result
 
 
 def load_file(path: str) -> list[Entry]:

@@ -5,23 +5,29 @@ Small Python CLI for managing markdown checkbox todos.
 ## Usage
 
 ```bash
-uv run python -m mdtodo add "랩 02 진행"
-uv run python -m mdtodo list
-uv run python -m mdtodo done 2
+python3 -m mdtodo add "buy milk"      # Added #1: buy milk
+python3 -m mdtodo list                # - [ ] 1. buy milk
+python3 -m mdtodo done 1              # Done #1: buy milk
 ```
 
 By default, `mdtodo` reads and writes `./tasks.md`.
 Set `MDTODO_FILE` to use another file:
 
 ```bash
-MDTODO_FILE=/tmp/tasks.md uv run python -m mdtodo list
+MDTODO_FILE=/tmp/tasks.md python3 -m mdtodo list
 ```
 
-Todo lines use markdown checkbox syntax:
+## Todo format
 
 ```markdown
 - [ ] incomplete task
 - [x] completed task
 ```
 
-`list` shows only incomplete items and renumbers them from 1.
+`list` shows only incomplete items, renumbered from 1.
+`done <N>` marks the N-th incomplete item (as shown by `list`) as done.
+Invalid `N` prints an error to stderr and exits with code 1.
+
+## Requirements
+
+Python 3.10+, standard library only.

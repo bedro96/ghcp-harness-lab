@@ -10,12 +10,14 @@
 
 ---
 
-## File structure
+## File Structure
 
-- Create `mdtodo.py`: single CLI module runnable with `python3 -m mdtodo` or `uv run python -m mdtodo`.
-- Create `tests/test_mdtodo.py`: unit tests for command behavior, filesystem behavior, stdout/stderr, and exit codes.
-- Create `README.md`: short usage guide, no more than 30 lines.
-- Modify `RETRO.md`: after implementation and review, record a short retrospective for the lab.
+- `mdtodo.py` — single CLI module runnable with `python3 -m mdtodo`.
+- `tests/test_mdtodo.py` — unit tests for command behavior, filesystem behavior, stdout/stderr, and exit codes.
+- `README.md` — short usage guide, no more than 30 lines.
+- `RETRO.md` — lab retrospective, filled in after review.
+
+---
 
 ## Task 1: Add and list behavior
 
@@ -173,11 +175,23 @@ def todo_path():
 def read_lines(path):
     if not path.exists():
         return []
-    return path.read_text(encoding="utf-8").splitlines(keepends=True)
+    with path.open(encoding="utf-8", newline="") as file:
+        return file.read().splitlines(keepends=True)
 
 
 def write_lines(path, lines):
-    path.write_text("".join(lines), encoding="utf-8")
+    with path.open("w", encoding="utf-8", newline="") as file:
+        file.write("".join(lines))
+
+
+def trailing_newline(line):
+    if line.endswith("\r\n"):
+        return "\r\n"
+    if line.endswith("\n"):
+        return "\n"
+    if line.endswith("\r"):
+        return "\r"
+    return ""
 
 
 def parse_todo_line(index, line):
@@ -254,8 +268,12 @@ Expected: all 4 tests pass.
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Add mdtodo add and list commands" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "Add mdtodo add and list commands
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
+
+---
 
 ## Task 2: Done behavior and invalid indexes
 
@@ -265,10 +283,25 @@ git commit -m "Add mdtodo add and list commands" -m "Co-authored-by: Copilot <22
 
 - [ ] **Step 1: Write failing tests for `done`**
 
-Append these tests inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
+Append the following class inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
 
 ```python
 class DoneTests(CliTestCase):
+    def test_done_preserves_crlf_line_endings_when_rewriting_item(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            todo_file = Path(tmp) / "tasks.md"
+            todo_file.write_bytes(b"- [ ] first\r\n- [ ] second\r\n")
+
+            code, stdout, stderr = self.run_cli(["done", "1"], todo_file=todo_file)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "Done: first\n")
+            self.assertEqual(stderr, "")
+            self.assertEqual(
+                todo_file.read_bytes(),
+                b"- [x] first\r\n- [ ] second\r\n",
+            )
+
     def test_done_marks_nth_incomplete_item_and_preserves_other_lines(self):
         with tempfile.TemporaryDirectory() as tmp:
             todo_file = Path(tmp) / "tasks.md"
@@ -357,7 +390,7 @@ class DoneTests(CliTestCase):
             self.assertFalse(todo_file.exists())
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify the new tests fail**
 
 Run:
 
@@ -365,20 +398,13 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-Expected: FAIL because `done` currently falls through to usage output.
+Expected: FAIL because `done` is not yet implemented.
 
-- [ ] **Step 3: Implement `done N`**
+- [ ] **Step 3: Implement `done N` in `mdtodo.py`**
 
-Replace the bottom half of `mdtodo.py`, from `def command_list():` through `main()`, with:
+Add the following functions before `main()` in `mdtodo.py`:
 
 ```python
-def command_list():
-    lines = read_lines(todo_path())
-    for number, todo in enumerate(incomplete_todos(lines), start=1):
-        print(f"- [ ] {number}. {todo.text}")
-    return 0
-
-
 def invalid_number(raw_number):
     print(f"Invalid todo number: {raw_number}", file=sys.stderr)
     return 1
@@ -401,13 +427,15 @@ def command_done(raw_number):
 
     todo = incomplete[number - 1]
     original_line = lines[todo.source_index]
-    newline = "\n" if original_line.endswith("\n") else ""
-    lines[todo.source_index] = f"- [x] {todo.text}{newline}"
+    lines[todo.source_index] = f"- [x] {todo.text}{trailing_newline(original_line)}"
     write_lines(path, lines)
     print(f"Done: {todo.text}")
     return 0
+```
 
+Then update `main()` to handle the `done` command:
 
+```python
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -423,7 +451,7 @@ def main(argv=None):
     return 1
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run tests to verify they all pass**
 
 Run:
 
@@ -431,14 +459,18 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-Expected: all 9 tests pass.
+Expected: all 10 tests pass.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Add mdtodo done command" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "Add mdtodo done command
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
+
+---
 
 ## Task 3: Default path, command shape, and module execution
 
@@ -446,9 +478,9 @@ git commit -m "Add mdtodo done command" -m "Co-authored-by: Copilot <223556219+C
 - Modify: `tests/test_mdtodo.py`
 - Modify: `mdtodo.py`
 
-- [ ] **Step 1: Write failing tests for default path and CLI shape**
+- [ ] **Step 1: Write tests for default path and CLI shape**
 
-Append these tests inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
+Append the following class inside `tests/test_mdtodo.py`, before the `if __name__ == "__main__":` block:
 
 ```python
 class PathAndCliTests(CliTestCase):
@@ -489,7 +521,7 @@ class PathAndCliTests(CliTestCase):
         self.assertEqual(stderr, "Usage: mdtodo add TEXT | list | done N\n")
 ```
 
-- [ ] **Step 2: Run tests to verify current behavior**
+- [ ] **Step 2: Run tests to verify they pass**
 
 Run:
 
@@ -497,51 +529,18 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-Expected: tests pass if command shape and default path already match. If any fail, continue to Step 3.
+Expected: all 14 tests pass. If any fail, the command shape or default path logic in `main()` needs adjustment.
 
-- [ ] **Step 3: Tighten `main()` if needed**
-
-Ensure `main()` in `mdtodo.py` exactly matches:
-
-```python
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-
-    if len(argv) >= 2 and argv[0] == "add":
-        return command_add(" ".join(argv[1:]))
-    if len(argv) == 1 and argv[0] == "list":
-        return command_list()
-    if len(argv) == 2 and argv[0] == "done":
-        return command_done(argv[1])
-
-    print("Usage: mdtodo add TEXT | list | done N", file=sys.stderr)
-    return 1
-```
-
-Ensure the module entrypoint remains:
-
-```python
-if __name__ == "__main__":
-    raise SystemExit(main())
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run:
-
-```bash
-python3 -m unittest discover -s tests
-```
-
-Expected: all tests pass.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add mdtodo.py tests/test_mdtodo.py
-git commit -m "Cover mdtodo path and usage behavior" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "Cover mdtodo path and usage behavior
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
+
+---
 
 ## Task 4: README
 
@@ -552,7 +551,7 @@ git commit -m "Cover mdtodo path and usage behavior" -m "Co-authored-by: Copilot
 
 Create `README.md`:
 
-````markdown
+```markdown
 # mdtodo
 
 Small Python CLI for managing markdown checkbox todos.
@@ -560,16 +559,16 @@ Small Python CLI for managing markdown checkbox todos.
 ## Usage
 
 ```bash
-uv run python -m mdtodo add "랩 02 진행"
-uv run python -m mdtodo list
-uv run python -m mdtodo done 2
+python3 -m mdtodo add "랩 02 진행"
+python3 -m mdtodo list
+python3 -m mdtodo done 2
 ```
 
 By default, `mdtodo` reads and writes `./tasks.md`.
 Set `MDTODO_FILE` to use another file:
 
 ```bash
-MDTODO_FILE=/tmp/tasks.md uv run python -m mdtodo list
+MDTODO_FILE=/tmp/tasks.md python3 -m mdtodo list
 ```
 
 Todo lines use markdown checkbox syntax:
@@ -580,22 +579,22 @@ Todo lines use markdown checkbox syntax:
 ```
 
 `list` shows only incomplete items and renumbers them from 1.
-````
+```
 
-- [ ] **Step 2: Verify README length**
+- [ ] **Step 2: Verify README length is ≤ 30 lines**
 
 Run:
 
 ```bash
-python3 - <<'PY'
+python3 -c "
 from pathlib import Path
-lines = Path("README.md").read_text(encoding="utf-8").splitlines()
+lines = Path('README.md').read_text(encoding='utf-8').splitlines()
 print(len(lines))
 raise SystemExit(0 if len(lines) <= 30 else 1)
-PY
+"
 ```
 
-Expected: prints a number less than or equal to 30 and exits 0.
+Expected: prints a number ≤ 30 and exits 0.
 
 - [ ] **Step 3: Run the full test suite**
 
@@ -605,14 +604,18 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-Expected: all tests pass.
+Expected: all 14 tests pass.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add README.md
-git commit -m "Add mdtodo README" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "Add mdtodo README
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
+
+---
 
 ## Task 5: Retrospective and final verification
 
@@ -651,22 +654,22 @@ Run:
 python3 -m unittest discover -s tests
 ```
 
-Expected: all tests pass.
+Expected: all 14 tests pass.
 
-- [ ] **Step 3: Check completion files exist**
+- [ ] **Step 3: Check all required files exist**
 
 Run:
 
 ```bash
-python3 - <<'PY'
+python3 -c "
 from pathlib import Path
-required = ["DESIGN.md", "PLAN.md", "RETRO.md", "README.md", "mdtodo.py", "tests/test_mdtodo.py"]
+required = ['DESIGN.md', 'PLAN.md', 'RETRO.md', 'README.md', 'mdtodo.py', 'tests/test_mdtodo.py']
 missing = [name for name in required if not Path(name).exists()]
 if missing:
-    print("Missing:", ", ".join(missing))
+    print('Missing:', ', '.join(missing))
     raise SystemExit(1)
-print("All required files exist")
-PY
+print('All required files exist')
+"
 ```
 
 Expected: prints `All required files exist`.
@@ -675,11 +678,15 @@ Expected: prints `All required files exist`.
 
 ```bash
 git add RETRO.md
-git commit -m "Add mdtodo retrospective" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git commit -m "Add mdtodo retrospective
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 ```
 
-## Self-review
+---
 
-- Spec coverage: tasks cover `MDTODO_FILE`, default `./tasks.md`, markdown checkbox parsing, `add`, `list`, `done`, invalid `N`, preservation of non-todo markdown, README, DESIGN.md, PLAN.md, and RETRO.md.
-- Placeholder scan: no unresolved placeholders are intentionally left in this plan.
-- Type consistency: the plan consistently uses `main(argv=None)`, `TodoLine`, `todo_path()`, `read_lines()`, `write_lines()`, `parse_todo_line()`, `todo_lines()`, `incomplete_todos()`, `command_add()`, `command_list()`, and `command_done()`.
+## Self-Review
+
+- **Spec coverage:** Tasks cover `MDTODO_FILE`, default `./tasks.md`, markdown checkbox parsing, `add`, `list`, `done`, invalid `N`, preservation of non-todo markdown, CRLF line endings, README ≤ 30 lines, DESIGN.md, PLAN.md, and RETRO.md.
+- **Placeholder scan:** No unresolved placeholders in this plan.
+- **Type consistency:** All tasks consistently use `main(argv=None)`, `TodoLine`, `todo_path()`, `read_lines()`, `write_lines()`, `trailing_newline()`, `parse_todo_line()`, `todo_lines()`, `incomplete_todos()`, `invalid_number()`, `command_add()`, `command_list()`, and `command_done()`.

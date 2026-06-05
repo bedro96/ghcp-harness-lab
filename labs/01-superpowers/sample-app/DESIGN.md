@@ -7,7 +7,7 @@ supports adding todos, listing incomplete todos, and marking the Nth incomplete
 todo done. It uses only the Python standard library and runs as:
 
 ```bash
-uv run python -m mdtodo ...
+python3 -m mdtodo ...
 ```
 
 ## Scope
@@ -46,7 +46,7 @@ The implementation is a single module, `mdtodo.py`, with small internal seams:
 This keeps command behavior easy to test while avoiding unnecessary classes or
 packaging.
 
-## Command behavior
+## Command Behavior
 
 ### `add TEXT`
 
@@ -90,7 +90,7 @@ If the file does not exist, if `N` is not an integer, if `N < 1`, or if `N`
 exceeds the number of incomplete todos, the command writes an error to stderr
 and exits 1.
 
-## Parsing rules
+## Parsing Rules
 
 The parser recognizes these todo line forms:
 
@@ -99,15 +99,13 @@ The parser recognizes these todo line forms:
 
 Only lowercase `x` is treated as completed. Lines that do not match these forms
 are non-todo markdown and are preserved. Line endings are preserved where
-possible; rewritten `done` lines keep a normal trailing newline when the source
-line had one.
+possible; rewritten `done` lines keep the original trailing newline.
 
-## Error handling
+## Error Handling
 
 User-facing command shape and invalid index errors are surfaced through stderr
 with exit code 1. Successful commands write their normal output to stdout and
-exit 0. The implementation should not silently ignore invalid `done` indexes,
-because that could make a user believe a task was completed when it was not.
+exit 0. The implementation does not silently ignore invalid `done` indexes.
 
 ## Testing
 
@@ -117,8 +115,8 @@ Tests live in `tests/test_mdtodo.py` and run with:
 python3 -m unittest discover -s tests
 ```
 
-The tests should use temporary directories or files and isolate `MDTODO_FILE`.
-Coverage should include:
+Tests use temporary directories or files and isolate `MDTODO_FILE`. Coverage
+includes:
 
 - adding to a missing file;
 - listing incomplete todos with renumbering;
